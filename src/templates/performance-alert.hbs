@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    .alert { padding: 20px; background-color: #f8f9fa; border-radius: 5px; }
+    .alert-error { border-left: 4px solid #dc3545; }
+    .alert-warning { border-left: 4px solid #ffc107; }
+    .metric { margin: 10px 0; }
+    .value { font-weight: bold; }
+  </style>
+</head>
+<body>
+  <div class="alert alert-{{type}}">
+    <h2>{{title}}</h2>
+    <p>{{message}}</p>
+    
+    <div class="metric">
+      <strong>Metric:</strong> {{metric}}
+    </div>
+    <div class="metric">
+      <strong>Value:</strong> <span class="value">{{value}}</span>
+    </div>
+    <div class="metric">
+      <strong>Threshold:</strong> {{threshold}}
+    </div>
+    <div class="metric">
+      <strong>Time:</strong> {{formatDate timestamp}}
+    </div>
+
+    {{#if recommendations}}
+    <div class="recommendations">
+      <h3>Recommendations:</h3>
+      <ul>
+        {{#each recommendations}}
+          <li>{{this}}</li>
+        {{/each}}
+      </ul>
+    </div>
+    {{/if}}
+  </div>
+</body>
+</html>
