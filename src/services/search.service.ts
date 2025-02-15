@@ -1,6 +1,7 @@
 import { FilterQuery } from 'mongoose';
 import { Product, IProduct } from '../models/product.model';
 import redisClient from '../config/redis.config';
+import { redisCommands } from '../utils/redis.util';
 
 interface SearchFilters {
   category?: string;
@@ -19,6 +20,10 @@ interface SortOptions {
 export class SearchService {
   private static async getCacheKey(query: string, filters: SearchFilters, sort: SortOptions): Promise<string> {
     return `search:${JSON.stringify({ query, filters, sort })}`;
+  }
+
+  static async cacheResults(key: string, results: any, ttl: number): Promise<void> {
+    await redisCommands.setex(redisClient, key, ttl, JSON.stringify(results));
   }
 
   static async searchProducts(
@@ -83,7 +88,7 @@ export class SearchService {
     };
 
     // Cache results for 5 minutes
-    await redisClient.setEx(cacheKey, 300, JSON.stringify(result));
+    await this.cacheResults(cacheKey, result, 300);
 
     return result;
   }
@@ -103,7 +108,7 @@ export class SearchService {
     .select('name slug images price')
     .limit(limit);
 
-    await redisClient.setEx(cacheKey, 300, JSON.stringify(suggestions));
+    await this.cacheResults(cacheKey, suggestions, 300);
     
     return suggestions;
   }

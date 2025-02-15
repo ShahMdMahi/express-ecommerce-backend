@@ -9,7 +9,7 @@ export class AnalyticsService {
 
   static async trackEvent(event: EcommerceEvent): Promise<void> {
     const eventKey = `analytics:ecommerce:${event.name}:${Date.now()}`;
-    await redisClient.setEx(eventKey, this.EVENT_EXPIRY, JSON.stringify(event));
+    await redisClient.setex(eventKey, this.EVENT_EXPIRY, JSON.stringify(event));
     await this.updateEventMetrics(event);
   }
 
@@ -32,7 +32,7 @@ export class AnalyticsService {
       // Handle revenue tracking
       if (event.name === 'purchase' && event.params.value) {
         const revenueKey = `analytics:revenue:${dayKey}`;
-        pipeline.incrBy(revenueKey as string, Math.floor(event.params.value * 100));
+        pipeline.incrby(revenueKey as string, Math.floor(event.params.value * 100));
       }
 
       // Handle conversion tracking

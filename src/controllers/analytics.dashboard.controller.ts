@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { ImageAnalyticsService } from '../services/image.analytics.service';
+import { redisCommands } from '../utils/redis.util';
 import redisClient from '../config/redis.config';
 
 export const getImagePerformanceDashboard = async (req: Request, res: Response) => {
@@ -41,12 +42,12 @@ export const getTopPerformingImages = async (req: Request, res: Response) => {
     const performanceData = [];
 
     for (const key of keys) {
-      const data = await redisClient.hGetAll(key);
-      if (data.views) {
+      const data = await redisCommands.hgetall(redisClient, key);
+      if (data?.views) {
         performanceData.push({
           path: key.split(':')[2],
           views: parseInt(data.views),
-          avgLoadTime: parseInt(data.totalLoadTime) / parseInt(data.views),
+          avgLoadTime: parseInt(data.totalLoadTime || '0') / parseInt(data.views),
           errors: parseInt(data.errors || '0')
         });
       }

@@ -2,13 +2,22 @@ import { readFileSync, writeFileSync } from 'fs';
 import path from 'path';
 import * as Handlebars from 'handlebars';
 import redisClient from '../config/redis.config';
-import { TemplateCustomization } from '../types/template.types';
+import { redisCommands } from '../utils/redis.util';
+import { TemplateCustomization, TemplateResponse } from '../types/template.types';
 import { MustacheStatement, Program, BlockStatement, Node } from '../types/handlebars.types';
 import { CACHE, PATHS } from '../config/constants';
+
+interface Template {
+  id: string;
+  content: string;
+  variables: Record<string, any>;
+  version: number;
+}
 
 export class TemplateCustomizationService {
   private static readonly CACHE_PREFIX = CACHE.TEMPLATE.PREFIX;
   private static readonly TEMPLATE_DIR = path.join(__dirname, '..', PATHS.TEMPLATES.CUSTOM);
+  private static readonly CACHE_TTL = 3600; // 1 hour
 
   static async saveTemplate(customization: Partial<TemplateCustomization>): Promise<TemplateCustomization> {
     const id = customization.id || Date.now().toString();
@@ -26,16 +35,17 @@ export class TemplateCustomizationService {
     writeFileSync(filePath, template.content);
 
     // Cache template
-    await redisClient.setEx(
+    await redisCommands.setex(
+      redisClient,
       `${this.CACHE_PREFIX}${id}`,
-      3600,
+      this.CACHE_TTL,
       JSON.stringify(template)
     );
 
     return template;
   }
 
-  static async getTemplate(id: string): Promise<TemplateCustomization | null> {
+  static async getTemplate(id: string): Promise<TemplateResponse> {
     // Try cache first
     const cached = await redisClient.get(`${this.CACHE_PREFIX}${id}`);
     if (cached) {
@@ -57,9 +67,10 @@ export class TemplateCustomizationService {
       };
 
       // Cache for future use
-      await redisClient.setEx(
+      await redisCommands.setex(
+        redisClient,
         `${this.CACHE_PREFIX}${id}`,
-        3600,
+        this.CACHE_TTL,
         JSON.stringify(template)
       );
 

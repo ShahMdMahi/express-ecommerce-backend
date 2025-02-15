@@ -145,7 +145,7 @@ src/
 ### Development
 
 1. Local development setup
-2. Docker containerization
+2. Vercel Ready
 3. Development database setup
 
 ### Staging

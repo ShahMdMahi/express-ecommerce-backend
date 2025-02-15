@@ -1,4 +1,6 @@
 import redisClient from '../config/redis.config';
+import { redisCommands } from '../utils/redis.util';
+import { Redis } from 'ioredis';
 
 interface ImageMetrics {
   views: number;
@@ -11,20 +13,29 @@ interface ImageMetrics {
 export class ImageAnalyticsService {
   private static readonly METRICS_TTL = 60 * 60 * 24 * 30; // 30 days
 
-  static async trackView(imageUrl: string, loadTime: number): Promise<void> {
-    const date = new Date().toISOString().split('T')[0];
-    const key = `image:metrics:${date}:${imageUrl}`;
+  constructor(private readonly redis: Redis) {}
 
-    try {
-      await redisClient
-        .multi()
-        .hIncrBy(key, 'views', 1)
-        .hIncrBy(key, 'totalLoadTime', loadTime)
-        .expire(key, this.METRICS_TTL)
-        .exec();
-    } catch (error) {
-      console.error('Error tracking image view:', error);
-    }
+  async incrementMetric(key: string, field: string, value: number = 1): Promise<void> {
+    const pipeline = this.redis.pipeline();
+    pipeline.hincrby(key, field, value);
+    await pipeline.exec();
+  }
+
+  async getMetrics(key: string): Promise<Record<string, string>> {
+    return await this.redis.hgetall(key);
+  }
+
+  async trackImageView(imageId: string): Promise<void> {
+    await this.incrementMetric(`image:${imageId}:stats`, 'views');
+  }
+
+  static async trackView(imageUrl: string, loadTime: number): Promise<void> {
+    const key = `image:metrics:${imageUrl}`;
+    const pipeline = redisClient.multi();
+    await redisCommands.hincrby(pipeline, key, 'views', 1);
+    await redisCommands.hincrby(pipeline, key, 'totalLoadTime', loadTime);
+    await pipeline.expire(key, this.METRICS_TTL);
+    await pipeline.exec();
   }
 
   static async trackError(imageUrl: string, errorType: string): Promise<void> {
@@ -34,8 +45,8 @@ export class ImageAnalyticsService {
     try {
       await redisClient
         .multi()
-        .hIncrBy(key, errorType, 1)
-        .hIncrBy(key, 'total', 1)
+        .hincrby(key, errorType, 1)
+        .hincrby(key, 'total', 1)
         .expire(key, this.METRICS_TTL)
         .exec();
     } catch (error) {
@@ -53,7 +64,7 @@ export class ImageAnalyticsService {
       const dateStr = date.toISOString().split('T')[0];
       const key = `image:metrics:${dateStr}:${imageUrl}`;
 
-      const data = await redisClient.hGetAll(key);
+      const data = await redisClient.hgetall(key);
       if (data) {
         metrics.push({
           views: parseInt(data.views || '0'),
@@ -70,15 +81,17 @@ export class ImageAnalyticsService {
 
   static async getErrorReport(startDate: string, endDate: string): Promise<Record<string, number>> {
     const errors: Record<string, number> = {};
-    const keys = await redisClient.keys(`image:errors:*`);
+    const keys = await redisClient.keys('image:errors:*');
 
     for (const key of keys) {
-      const data = await redisClient.hGetAll(key);
-      Object.entries(data).forEach(([type, count]) => {
-        if (type !== 'total') {
-          errors[type] = (errors[type] || 0) + parseInt(count);
-        }
-      });
+      const data = await redisCommands.hgetall(redisClient, key);
+      if (data) {
+        Object.entries(data).forEach(([type, count]) => {
+          if (type !== 'total') {
+            errors[type] = (errors[type] || 0) + parseInt(count);
+          }
+        });
+      }
     }
 
     return errors;
@@ -97,9 +110,9 @@ export class ImageAnalyticsService {
     try {
       await redisClient
         .multi()
-        .hIncrBy(key, 'totalOptimizations', 1)
-        .hIncrBy(key, 'totalSizeReduction', metrics.originalSize - metrics.optimizedSize)
-        .hIncrBy(key, `format:${metrics.format}`, 1)
+        .hincrby(key, 'totalOptimizations', 1)
+        .hincrby(key, 'totalSizeReduction', metrics.originalSize - metrics.optimizedSize)
+        .hincrby(key, `format:${metrics.format}`, 1)
         .expire(key, this.METRICS_TTL)
         .exec();
     } catch (error) {
@@ -125,33 +138,22 @@ export class ImageAnalyticsService {
     errorRate: number;
     bandwidthSaved: number;
   }> {
-    const endDate = new Date();
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - timeframe);
-
-    let totalViews = 0;
-    let totalLoadTime = 0;
-    let totalErrors = 0;
-    let bandwidthSaved = 0;
-
     const keys = await redisClient.keys('image:metrics:*');
-    
-    for (const key of keys) {
-      const data = await redisClient.hGetAll(key);
-      if (data.views) {
-        totalViews += parseInt(data.views);
-        totalLoadTime += parseInt(data.totalLoadTime || '0');
-        totalErrors += parseInt(data.errors || '0');
-        bandwidthSaved += parseInt(data.sizeReduction || '0');
-      }
-    }
+    const metrics = await Promise.all(
+      keys.map(key => redisClient.hgetall(key))
+    );
 
-    return {
-      totalViews,
-      avgLoadTime: totalViews ? totalLoadTime / totalViews : 0,
-      errorRate: totalViews ? (totalErrors / totalViews) * 100 : 0,
-      bandwidthSaved
-    };
+    return metrics.reduce((acc, data) => ({
+      totalViews: acc.totalViews + parseInt(data.views || '0'),
+      avgLoadTime: acc.avgLoadTime + parseInt(data.totalLoadTime || '0'),
+      errorRate: acc.errorRate + parseInt(data.errors || '0'),
+      bandwidthSaved: acc.bandwidthSaved + parseInt(data.sizeReduction || '0')
+    }), {
+      totalViews: 0,
+      avgLoadTime: 0,
+      errorRate: 0,
+      bandwidthSaved: 0
+    });
   }
 
   static async getImageHealthScore(imageUrl: string): Promise<number> {
@@ -163,5 +165,11 @@ export class ImageAnalyticsService {
     const errorScore = Math.max(0, 100 - (metric.errors * 20));
 
     return Math.round((loadTimeScore + errorScore) / 2);
+  }
+
+  static async trackMetric(path: string, metric: string, value: number) {
+    const pipeline = redisClient.multi();
+    await redisCommands.hincrby(pipeline, `image:metrics:${path}`, metric, value);
+    await pipeline.exec();
   }
 }

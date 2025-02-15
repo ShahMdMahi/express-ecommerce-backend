@@ -1,5 +1,6 @@
 import { put } from '@vercel/blob';
 import redisClient from '../config/redis.config';
+import { redisCommands } from '../utils/redis.util';
 
 interface CDNOptions {
   contentType?: string;
@@ -39,10 +40,14 @@ export class CDNService {
   }
 
   private static async cacheUrl(path: string, url: string): Promise<void> {
-    await redisClient.setEx(`cdn:url:${path}`, this.CACHE_TTL, url);
+    await redisClient.setex(`cdn:url:${path}`, this.CACHE_TTL, url);
   }
 
   static async invalidateCache(path: string): Promise<void> {
     await redisClient.del(`cdn:url:${path}`);
+  }
+
+  static async cacheResponse(key: string, data: any, ttl: number): Promise<void> {
+    await redisCommands.setex(redisClient, key, ttl, JSON.stringify(data));
   }
 }

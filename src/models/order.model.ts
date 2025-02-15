@@ -1,95 +1,74 @@
-import mongoose, { Document } from 'mongoose';
+import mongoose, { Document, Schema } from 'mongoose';
+import { IOrderBase, OrderStatus, PaymentStatus } from '../types/order.types';
 
-export interface IOrderItem {
-  product: mongoose.Types.ObjectId;
-  variant?: string;
-  quantity: number;
-  price: number;
-}
-
-// Base interface without _id
-export interface IOrderBase {
-  user: mongoose.Types.ObjectId;
-  items: IOrderItem[];
-  status: 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled';
-  shippingAddress: {
-    street: string;
-    city: string;
-    state: string;
-    country: string;
-    zipCode: string;
-  };
-  payment: {
-    provider?: 'bkash' | 'cod' | 'card';
-    paymentId?: string;
-    trxID?: string;
-    createTime?: string;
-    executeTime?: string;
-    transactionStatus?: string;
-  };
-  paymentMethod: 'credit_card' | 'paypal' | 'cod';
-  paymentStatus: 'pending' | 'paid' | 'failed' | 'refunded';
-  totalAmount: number;
-  shippingCost: number;
-  tax: number;
-  notes?: string;
-}
-
-// Interface for regular usage with optional _id
 export interface IOrder extends IOrderBase {
-  _id?: mongoose.Types.ObjectId;
+    createdAt: Date;
+    updatedAt: Date;
+    totalAmount: number;
+    shippingCost: number;
+    paymentMethod: string;
+    paymentStatus: string;
 }
 
-// Interface for documents from MongoDB
-export interface IOrderDocument extends IOrderBase, Document {
-  createdAt: Date;
-  updatedAt: Date;
-}
+export interface IOrderDocument extends IOrder, Document {}
 
-const orderSchema = new mongoose.Schema({
-  user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  items: [{
-    product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
+const orderItemSchema = new Schema({
+    product: { type: Schema.Types.ObjectId, ref: 'Product', required: true },
     variant: String,
-    quantity: { type: Number, required: true },
-    price: { type: Number, required: true }
-  }],
-  status: {
-    type: String,
-    enum: ['pending', 'processing', 'shipped', 'delivered', 'cancelled'],
-    default: 'pending'
-  },
-  shippingAddress: {
-    street: { type: String, required: true },
+    quantity: { type: Number, required: true, min: 1 },
+    price: { type: Number, required: true },
+    name: { type: String, required: true }
+});
+
+const shippingDetailsSchema = new Schema({
+    address: { type: String, required: true },
     city: { type: String, required: true },
     state: { type: String, required: true },
     country: { type: String, required: true },
-    zipCode: { type: String, required: true }
-  },
-  payment: {
-    provider: { type: String, enum: ['bkash', 'cod', 'card'] },
-    paymentId: String,
-    trxID: String,
-    createTime: String,
-    executeTime: String,
-    transactionStatus: String
-  },
-  paymentMethod: {
-    type: String,
-    enum: ['credit_card', 'paypal', 'cod'],
-    required: true
-  },
-  paymentStatus: {
-    type: String,
-    enum: ['pending', 'paid', 'failed', 'refunded'],
-    default: 'pending'
-  },
-  totalAmount: { type: Number, required: true },
-  shippingCost: { type: Number, required: true },
-  tax: { type: Number, required: true },
-  notes: String
-}, {
-  timestamps: true
+    zipCode: { type: String, required: true },
+    phone: { type: String, required: true },
+    trackingNumber: String,
+    carrier: String
 });
+
+const orderSchema = new Schema({
+    user: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    items: [orderItemSchema],
+    totalAmount: { type: Number, required: true },
+    subTotal: { type: Number, required: true },
+    tax: { type: Number, required: true },
+    shippingCost: { type: Number, required: true },
+    shipping: {
+        cost: { type: Number, required: true },
+        details: shippingDetailsSchema
+    },
+    status: {
+        type: String,
+        enum: Object.values(OrderStatus),
+        default: OrderStatus.PENDING
+    },
+    paymentMethod: { type: String, required: true },
+    paymentStatus: { type: String, default: 'pending' },
+    payment: {
+        method: { type: String, required: true },
+        status: {
+            type: String,
+            enum: Object.values(PaymentStatus),
+            default: PaymentStatus.PENDING
+        },
+        transactionId: String,
+        trxID: String,
+        executeTime: Date
+    },
+    notes: String
+}, {
+    timestamps: true
+});
+
+// Indexes
+orderSchema.index({ user: 1, createdAt: -1 });
+orderSchema.index({ status: 1 });
+orderSchema.index({ 'payment.status': 1 });
+orderSchema.index({ createdAt: 1 });
 
 export const Order = mongoose.model<IOrderDocument>('Order', orderSchema);

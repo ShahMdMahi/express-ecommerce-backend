@@ -1,17 +1,33 @@
 import nodemailer from 'nodemailer';
 import { getEmailTransporter, isUsingDevEmail } from '../config/email.config';
-import { IOrder, IOrderDocument } from '../models/order.model';
-import { IUser, IUserDocument } from '../models/user.model';
+import { IOrder } from '../models/order.model';
+import { IUser } from '../models/user.model';
+import { IOrderItem, OrderStatus } from '../types/order.types';
 import type { SentMessageInfo } from 'nodemailer';
+import fs from 'fs/promises';
+import path from 'path';
+import Handlebars from 'handlebars';
 
 interface EmailOptions {
-  to: string | string[];
-  subject: string;
-  text?: string;
-  html?: string;
+    to: string | string[];
+    subject: string;
+    text?: string;
+    html?: string;
+}
+
+interface OrderEmailData {
+  _id: string;
+  user: IUser;
+  totalAmount: number;
+  items: IOrderItem[];
+  status: OrderStatus;
+  // Add other required fields from IOrder but omit user
 }
 
 export class EmailService {
+  private static readonly TEMPLATE_DIR = path.join(__dirname, '../templates/email');
+  private static readonly templates: Record<string, HandlebarsTemplateDelegate> = {};
+
   private static transporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
@@ -20,36 +36,70 @@ export class EmailService {
     }
   });
 
-  static async sendMail(options: EmailOptions): Promise<void> {
-    try {
-      await this.transporter.sendMail({
-        from: process.env.GMAIL_USER,
-        to: Array.isArray(options.to) ? options.to.join(',') : options.to,
-        subject: options.subject,
-        text: options.text,
-        html: options.html
-      });
-    } catch (error) {
-      console.error('Failed to send email:', error);
-      throw new Error('Email sending failed');
+  private static async getTemplate(name: string): Promise<HandlebarsTemplateDelegate> {
+    if (this.templates[name]) {
+      return this.templates[name];
     }
+
+    const templatePath = path.join(this.TEMPLATE_DIR, `${name}.hbs`);
+    const templateContent = await fs.readFile(templatePath, 'utf-8');
+    this.templates[name] = Handlebars.compile(templateContent);
+    return this.templates[name];
   }
 
-  static async sendOrderConfirmation(order: IOrderDocument | IOrder, user: IUserDocument | IUser) {
+  private static async compileTemplate(template: HandlebarsTemplateDelegate, data: any): Promise<string> {
+    return template(data);
+  }
+
+  private static async sendMail(options: EmailOptions): Promise<SentMessageInfo> {
+    return this.transporter.sendMail({
+      from: process.env.EMAIL_FROM,
+      ...options
+    });
+  }
+
+  static async sendOrderConfirmation(order: OrderEmailData): Promise<void> {
     try {
-      const emailResponse: SentMessageInfo = await this.sendMail({
-        to: isUsingDevEmail() ? 'test@example.com' : user.email,
-        subject: `Order Confirmation #${order._id?.toString() || 'New'}`,
-        html: this.getOrderConfirmationTemplate(order, user)
+      const template = await this.getTemplate('order-confirmation');
+      const html = await this.compileTemplate(template, {
+        orderId: order._id,
+        items: order.items,
+        total: order.totalAmount,
+        user: order.user
       });
 
-      if (isUsingDevEmail() && nodemailer.getTestMessageUrl(emailResponse)) {
-        console.log('Preview URL:', nodemailer.getTestMessageUrl(emailResponse));
-      }
+      await this.sendMail({
+        to: isUsingDevEmail() ? 'test@example.com' : order.user.email,
+        subject: `Order Confirmation #${order._id}`,
+        html
+      });
     } catch (error) {
       console.error('Order confirmation email error:', error);
       if (!isUsingDevEmail()) {
         throw new Error('Failed to send order confirmation email');
+      }
+    }
+  }
+
+  static async sendOrderStatusUpdate(order: OrderEmailData): Promise<void> {
+    try {
+      const template = await this.getTemplate('order-status-update');
+      const html = await this.compileTemplate(template, {
+        orderId: order._id,
+        items: order.items,
+        total: order.totalAmount,
+        user: order.user
+      });
+
+      await this.sendMail({
+        to: isUsingDevEmail() ? 'test@example.com' : order.user.email,
+        subject: `Order Status Update #${order._id}`,
+        html
+      });
+    } catch (error) {
+      console.error('Order status update email error:', error);
+      if (!isUsingDevEmail()) {
+        throw new Error('Failed to send order status update email');
       }
     }
   }
@@ -94,16 +144,16 @@ export class EmailService {
     }
   }
 
-  private static getOrderConfirmationTemplate(order: IOrderDocument | IOrder, user: IUserDocument | IUser): string {
+  private static getOrderConfirmationTemplate(order: OrderEmailData): string {
     return `
       <h1>Order Confirmation</h1>
-      <p>Dear ${user.firstName},</p>
+      <p>Dear ${order.user.firstName},</p>
       <p>Thank you for your order! Here are your order details:</p>
-      <h2>Order #${order._id?.toString() || 'New'}</h2>
+      <h2>Order #${order._id}</h2>
       <h3>Items:</h3>
       <ul>
-        ${order.items.map(item => `
-          <li>${item.product.toString()} - Quantity: ${item.quantity} - $${item.price}</li>
+        ${order.items.map((item: IOrderItem) => `
+          <li>${item.name} - Quantity: ${item.quantity} - $${item.price}</li>
         `).join('')}
       </ul>
       <p>Total: $${order.totalAmount}</p>

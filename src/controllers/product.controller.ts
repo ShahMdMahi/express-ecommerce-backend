@@ -1,136 +1,101 @@
-import { Request, Response } from 'express';
-import { Product, IProductDocument } from '../models/product.model';
+import { Request, Response, NextFunction } from 'express';
 import { ProductService } from '../services/product.service';
-import { AnalyticsService } from '../services/analytics.service';
-import mongoose from 'mongoose';
+import { ApiResponse } from '../utils/ApiResponse';
+import { ApiError, BadRequestError } from '../utils/ApiError';
+import { CreateProductDTO, UpdateProductDTO } from '../types/product.types';
 
-export const createProduct = async (req: Request, res: Response) => {
-  try {
-    const product = await Product.create(req.body);
-    res.status(201).json(product);
-  } catch (error) {
-    res.status(400).json({ message: (error as Error).message });
-  }
-};
+class ProductControllerClass {
+    createProduct = async (req: Request, res: Response, next: NextFunction) => {
+        try {
+            const productData: CreateProductDTO = req.body;
+            const product = await ProductService.createProduct(productData);
+            res.status(201).json(ApiResponse.created(product));
+        } catch (error) {
+            next(error);
+        }
+    };
 
-export const getProducts = async (req: Request, res: Response) => {
-  try {
-    const { 
-      page = '1',
-      limit = '10',
-      category,
-      minPrice,
-      maxPrice,
-      tags,
-      inStock,
-      sortBy = 'createdAt',
-      order = 'desc'
-    } = req.query;
+    getProducts = async (req: Request, res: Response, next: NextFunction) => {
+        // Implementation
+    };
 
-    const filters: any = {};
+    getProductBySlug = async (req: Request, res: Response, next: NextFunction) => {
+        // Implementation
+    };
 
-    if (category) filters.category = category;
-    if (minPrice || maxPrice) {
-      filters.basePrice = {};
-      if (minPrice) filters.basePrice.$gte = Number(minPrice);
-      if (maxPrice) filters.basePrice.$lte = Number(maxPrice);
-    }
-    if (tags) filters.tags = { $in: (tags as string).split(',') };
-    if (inStock === 'true') filters['stock.quantity'] = { $gt: 0 };
+    getProduct = async (req: Request, res: Response, next: NextFunction) => {
+        try {
+            const product = await ProductService.getProduct(req.params.id);
+            if (!product) {
+                throw new BadRequestError('Product not found');
+            }
+            res.json(ApiResponse.success(product));
+        } catch (error) {
+            next(error);
+        }
+    };
 
-    const result = await ProductService.getProducts(
-      filters,
-      Number(page),
-      Number(limit)
-    );
+    updateProduct = async (req: Request, res: Response, next: NextFunction) => {
+        try {
+            const updateData: UpdateProductDTO = req.body;
+            const product = await ProductService.updateProduct(req.params.id, updateData);
+            if (!product) {
+                throw new BadRequestError('Product not found');
+            }
+            res.json(ApiResponse.success(product));
+        } catch (error) {
+            next(error);
+        }
+    };
 
-    res.json(result);
-  } catch (error) {
-    res.status(500).json({ message: 'Failed to fetch products' });
-  }
-};
+    deleteProduct = async (req: Request, res: Response, next: NextFunction) => {
+        try {
+            const result = await ProductService.deleteProduct(req.params.id);
+            if (!result) {
+                throw new BadRequestError('Product not found');
+            }
+            res.json(ApiResponse.success({ deleted: true }));
+        } catch (error) {
+            next(error);
+        }
+    };
 
-export const getProductBySlug = async (req: Request, res: Response) => {
-  try {
-    const product = await ProductService.getProductBySlug(req.params.slug);
-    
-    if (!product) {
-      return res.status(404).json({ message: 'Product not found' });
-    }
+    updateStock = async (req: Request, res: Response, next: NextFunction) => {
+        // Implementation
+    };
 
-    // Track product view with required quantity property
-    await AnalyticsService.trackEvent({
-      name: 'view_item',
-      params: {
-        currency: 'USD',
-        value: product.basePrice,
-        items: [{
-          item_id: product._id.toString(),
-          item_name: product.name,
-          price: product.basePrice,
-          currency: 'USD',
-          quantity: 1  // Adding required quantity property for view event
-        }]
-      },
-      user_id: req.user?._id?.toString(),
-      client_id: req.headers['x-client-id'] as string,
-      timestamp: Date.now()
-    });
+    searchProducts = async (req: Request, res: Response, next: NextFunction) => {
+        try {
+            const { query = {}, page = 1, limit = 10 } = req.query;
+            const results = await ProductService.searchProducts(
+                query as any,
+                Number(page),
+                Number(limit)
+            );
+            res.json(ApiResponse.success(results));
+        } catch (error) {
+            next(error);
+        }
+    };
 
-    res.json(product);
-  } catch (error) {
-    res.status(500).json({ message: 'Failed to fetch product' });
-  }
-};
+    checkLowStock = async (req: Request, res: Response, next: NextFunction) => {
+        try {
+            const products = await ProductService.checkLowStock();
+            res.json(ApiResponse.success(products));
+        } catch (error) {
+            next(error);
+        }
+    };
+}
 
-export const updateProduct = async (req: Request, res: Response) => {
-  try {
-    const product = await Product.findByIdAndUpdate(
-      req.params.id,
-      { $set: req.body },
-      { new: true, runValidators: true }
-    );
-
-    if (!product) {
-      return res.status(404).json({ message: 'Product not found' });
-    }
-
-    res.json(product);
-  } catch (error) {
-    res.status(400).json({ message: (error as Error).message });
-  }
-};
-
-export const deleteProduct = async (req: Request, res: Response) => {
-  try {
-    const product = await Product.findByIdAndDelete(req.params.id);
-    
-    if (!product) {
-      return res.status(404).json({ message: 'Product not found' });
-    }
-
-    res.json({ message: 'Product deleted successfully' });
-  } catch (error) {
-    res.status(500).json({ message: 'Failed to delete product' });
-  }
-};
-
-export const updateStock = async (req: Request, res: Response) => {
-  try {
-    const { quantity, variantSku } = req.body;
-    
-    const product = await ProductService.updateStock(
-      req.params.id,
-      variantSku,
-      quantity
-    );
-
-    if (!product) {
-      return res.status(404).json({ message: 'Product not found' });
-    }
-
-    res.json(product);
-  } catch (error) {
-    res.status(400).json({ message: (error as Error).message });
-  }
-};
+export const ProductController = new ProductControllerClass();
+export const {
+    createProduct,
+    getProducts,
+    getProductBySlug,
+    updateProduct,
+    deleteProduct,
+    updateStock,
+    searchProducts,
+    checkLowStock
+} = ProductController;

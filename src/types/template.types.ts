@@ -9,6 +9,8 @@ export interface TemplateCustomization {
   lastModified: Date;
 }
 
+export type TemplateResponse = TemplateCustomization | null;
+
 export interface TemplateData {
   [key: string]: any;
 }

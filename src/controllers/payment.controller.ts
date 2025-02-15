@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { PaymentService } from '../services/payment.service';
 import { Order } from '../models/order.model';
+import { PaymentStatus, PaymentDetails } from '../types/order.types';
 import mongoose from 'mongoose';
 
 export const initiateBkashPayment = async (req: Request, res: Response) => {
@@ -52,13 +53,14 @@ export const executeBkashPayment = async (req: Request, res: Response) => {
     }
 
     if (execution.transactionStatus === 'Completed') {
-      order.paymentStatus = 'paid';
-      order.payment = {
-        ...order.payment,
-        trxID: execution.trxID,
-        executeTime: execution.updateTime, // Changed from executeTime to updateTime
-        transactionStatus: execution.transactionStatus
+      const updatedPayment: PaymentDetails = {
+        method: order.payment.method,
+        status: PaymentStatus.PAID,
+        transactionId: execution.trxID,
+        executeTime: new Date()
       };
+      
+      order.payment = updatedPayment;
       await order.save();
     }
 

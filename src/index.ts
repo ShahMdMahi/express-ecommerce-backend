@@ -34,8 +34,11 @@ app.use(trackPageView);
 // Connect to Database
 connectDB();
 
-// Connect to Redis
-connectRedis().catch(console.error);
+// Connect to Redis with proper error handling
+connectRedis().catch((error) => {
+    console.error('Failed to connect to Redis:', error);
+    process.exit(1);
+});
 
 // Routes
 app.use("/api/auth", authRoutes);

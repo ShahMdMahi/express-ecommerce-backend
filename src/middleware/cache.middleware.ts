@@ -17,7 +17,7 @@ export const cacheMiddleware = (duration: number) => {
 
       const originalJson = res.json;
       res.json = function (data) {
-        redisClient.setEx(key, duration, JSON.stringify(data));
+        redisClient.setex(key, duration, JSON.stringify(data));
         return originalJson.call(this, data);
       };
 

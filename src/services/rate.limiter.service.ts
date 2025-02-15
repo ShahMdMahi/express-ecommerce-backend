@@ -1,4 +1,5 @@
 import redisClient from '../config/redis.config';
+import { redisCommands } from '../utils/redis.util';
 
 interface RateLimitConfig {
   key: string;
@@ -7,6 +8,54 @@ interface RateLimitConfig {
 }
 
 export class RateLimiterService {
+  private static readonly WINDOW_SIZE_MS = 60 * 1000; // 1 minute
+  private static readonly MAX_REQUESTS = 100;
+
+  static async checkRateLimit(identifier: string): Promise<{
+    allowed: boolean;
+    remaining: number;
+    resetTime: number;
+  }> {
+    const key = `ratelimit:${identifier}`;
+    const now = Date.now();
+    const windowStart = now - this.WINDOW_SIZE_MS;
+
+    await RateLimiterService.cleanup(key, windowStart);
+    const requestCount = await RateLimiterService.getRequestCount(key);
+
+    if (requestCount >= this.MAX_REQUESTS) {
+      return {
+        allowed: false,
+        remaining: 0,
+        resetTime: windowStart + this.WINDOW_SIZE_MS
+      };
+    }
+
+    // Record new request
+    await redisCommands.setex(redisClient, `${key}:${now}`, this.WINDOW_SIZE_MS / 1000, '1');
+
+    return {
+      allowed: true,
+      remaining: this.MAX_REQUESTS - requestCount - 1,
+      resetTime: windowStart + this.WINDOW_SIZE_MS
+    };
+  }
+
+  private static async cleanup(key: string, windowStart: number): Promise<void> {
+    const keys = await redisClient.keys(`${key}:*`);
+    for (const k of keys) {
+      const timestamp = parseInt(k.split(':').pop() || '0');
+      if (timestamp < windowStart) {
+        await redisClient.del(k);
+      }
+    }
+  }
+
+  private static async getRequestCount(key: string): Promise<number> {
+    const keys = await redisClient.keys(`${key}:*`);
+    return keys.length;
+  }
+
   static async isAllowed(config: RateLimitConfig): Promise<boolean> {
     const { key, limit, window } = config;
     const now = Date.now();
@@ -38,6 +87,6 @@ export class RateLimiterService {
 
   static async trackNotification(type: string): Promise<void> {
     const key = `notification:${type}:${Date.now()}`;
-    await redisClient.setEx(key, 86400, '1'); // Store for 24 hours
+    await redisCommands.setex(redisClient, key, 86400, '1');
   }
 }

@@ -1,9 +1,28 @@
 import { Request, Response } from 'express';
 import { Order, IOrderDocument } from '../models/order.model';
 import { Product } from '../models/product.model';
-import mongoose from 'mongoose';
+import mongoose, { Types } from 'mongoose';
 import { EmailService } from '../services/email.service';
 import { AnalyticsService } from '../services/analytics.service';
+import { OrderStatus } from '../types/order.types';
+
+export class OrderController {
+  async handleOrder(req: Request, res: Response): Promise<void> {
+    try {
+      const order = await Order.create(req.body) as IOrderDocument & { _id: Types.ObjectId };
+      await EmailService.sendOrderConfirmation({
+        _id: order._id.toString(),
+        user: req.user,
+        totalAmount: order.totalAmount,
+        items: order.items,
+        status: order.status as OrderStatus
+      });
+      res.status(201).json(order);
+    } catch (error) {
+      res.status(400).json({ error: (error as Error).message });
+    }
+  }
+}
 
 export const createOrder = async (req: Request, res: Response) => {
   const session = await mongoose.startSession();
@@ -33,7 +52,7 @@ export const createOrder = async (req: Request, res: Response) => {
     const shippingCost = 10; // Calculate based on address and weight
     const tax = totalAmount * 0.1; // Calculate based on region
 
-    const order: IOrderDocument = (await Order.create([{
+    const orderDoc = (await Order.create([{
       user: req.user._id,
       items,
       shippingAddress,
@@ -41,14 +60,26 @@ export const createOrder = async (req: Request, res: Response) => {
       totalAmount,
       shippingCost,
       tax,
-      status: 'pending',
+      status: 'pending' as OrderStatus,
       paymentStatus: 'pending'
     }], { session }))[0];
+
+    // Explicitly type cast the order document
+    const order = orderDoc.toObject() as IOrderDocument & {
+      _id: Types.ObjectId;
+      status: OrderStatus;
+    };
 
     await Product.bulkWrite(stockUpdates, { session });
 
     // Send order confirmation email
-    await EmailService.sendOrderConfirmation(order, req.user);
+    await EmailService.sendOrderConfirmation({
+      _id: order._id.toString(),
+      user: req.user,
+      totalAmount: order.totalAmount,
+      items: order.items,
+      status: order.status
+    });
 
     // Track purchase event
     await AnalyticsService.trackEvent(

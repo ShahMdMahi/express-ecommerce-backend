@@ -73,7 +73,7 @@ This project aims to create a highly scalable, feature-rich, and customizable ec
 
 6. **Checkout and Payments**
 
-   - Stripe and PayPal integration
+   - Bkash integration
    - Cash on Delivery system
    - Coupon and discount management
    - Order summary and confirmation
